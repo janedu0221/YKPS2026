@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>单网页全功能弹幕系统</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body, html { width: 100%; height: 100%; overflow: hidden; background: #0f172a; font-family: -apple-system, sans-serif; }
+
+    /* 1. 弹幕屏幕 */
+    #screen { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; }
+
+    /* 2. 弹幕文本样式 */
+    .danmaku-item {
+      position: absolute;
+      white-space: nowrap;
+      color: #ffffff;
+      font-size: 32px;
+      font-weight: bold;
+      text-shadow: 2px 2px 8px rgba(0,0,0,0.8);
+      will-change: transform;
+    }
+
+    /* 3. 控制面板/模拟手机面板 */
+    #control-panel {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      z-index: 10;
+      background: rgba(30, 41, 59, 0.85);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255,255,255,0.1);
+      padding: 16px;
+      border-radius: 16px;
+      display: flex;
+      gap: 12px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    }
+
+    input {
+      width: 260px;
+      padding: 10px 14px;
+      border-radius: 8px;
+      border: 1px solid #334155;
+      background: #0f172a;
+      color: #fff;
+      font-size: 16px;
+      outline: none;
+    }
+    input:focus { border-color: #38bdf8; }
+
+    button {
+      padding: 10px 20px;
+      border-radius: 8px;
+      border: none;
+      background: #2563eb;
+      color: white;
+      font-weight: bold;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    button:hover { background: #1d4ed8; }
+
+    /* 4. 二维码展板 */
+    #qrcode-box {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      z-index: 10;
+      background: rgba(255, 255, 255, 0.95);
+      padding: 12px;
+      border-radius: 12px;
+      text-align: center;
+    }
+    #qrcode-box p { font-size: 12px; color: #333; margin-top: 4px; font-weight: bold; }
+  </style>
+  <!-- 引入前端动态生成二维码的轻量库 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+<body>
+
+  <!-- 弹幕画布 -->
+  <div id="screen"></div>
+
+  <!-- 本地控制台（模拟手机输入） -->
+  <div id="control-panel">
+    <input type="text" id="danmakuInput" placeholder="输入弹幕内容..." onkeydown="if(event.key==='Enter') sendDanmaku()">
+    <button onclick="sendDanmaku()">发射</button>
+  </div>
+
+  <!-- 二维码显示区 -->
+  <div id="qrcode-box">
+    <div id="qrcode"></div>
+    <p>扫码或多标签页互动</p>
+  </div>
+
+  <script>
+    // 1. 建立浏览器跨标签页通信频道
+    const channel = new BroadcastChannel('danmaku_channel');
+
+    const screen = document.getElementById('screen');
+    const input = document.getElementById('danmakuInput');
+
+    // 2. 自动根据当前网页地址生成二维码
+    new QRCode(document.getElementById("qrcode"), {
+      text: window.location.href,
+      width: 100,
+      height: 100
+    });
+
+    // 3. 渲染弹幕逻辑
+    const TRACK_HEIGHT = 50;
+    const TRACK_COUNT = Math.floor(window.innerHeight / TRACK_HEIGHT) - 2;
+
+    function createDanmaku(text) {
+      const el = document.createElement('div');
+      el.className = 'danmaku-item';
+      el.innerText = text;
+
+      // 随机分配轨道
+      const track = Math.floor(Math.random() * Math.max(1, TRACK_COUNT));
+      el.style.top = `${track * TRACK_HEIGHT + 20}px`;
+
+      screen.appendChild(el);
+
+      const startX = window.innerWidth;
+      const anim = el.animate([
+        { transform: `translateX(${startX}px)` },
+        { transform: `translateX(-100%)` }
+      ], {
+        duration: 7000,
+        easing: 'linear'
+      });
+
+      anim.onfinish = () => el.remove();
+    }
+
+    // 4. 发送弹幕（同时广播给其他打开的标签页）
+    function sendDanmaku() {
+      const text = input.value.trim();
+      if (!text) return;
+
+      // 本地渲染
+      createDanmaku(text);
+
+      // 广播给其他页面
+      channel.postMessage({ text: text });
+
+      input.value = '';
+    }
+
+    // 5. 监听其他页面发送过来的广播弹幕
+    channel.onmessage = (event) => {
+      if (event.data && event.data.text) {
+        createDanmaku(event.data.text);
+      }
+    };
+  </script>
+</body>
+</html>
