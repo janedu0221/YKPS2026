@@ -2,159 +2,164 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <title>单网页全功能弹幕系统</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GitHub 免备案实时弹幕系统</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body, html { width: 100%; height: 100%; overflow: hidden; background: #0f172a; font-family: -apple-system, sans-serif; }
-
-    /* 1. 弹幕屏幕 */
-    #screen { position: absolute; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 1; }
-
-    /* 2. 弹幕文本样式 */
+    body, html { width: 100%; height: 100%; overflow: hidden; background: #0b0f19; font-family: -apple-system, sans-serif; color: #fff; }
+    #screen { position: relative; width: 100vw; height: 100vh; }
+    
     .danmaku-item {
       position: absolute;
       white-space: nowrap;
       color: #ffffff;
       font-size: 32px;
       font-weight: bold;
-      text-shadow: 2px 2px 8px rgba(0,0,0,0.8);
+      text-shadow: 2px 2px 6px rgba(0,0,0,0.9);
       will-change: transform;
     }
 
-    /* 3. 控制面板/模拟手机面板 */
-    #control-panel {
-      position: absolute;
-      bottom: 20px;
-      left: 20px;
-      z-index: 10;
-      background: rgba(30, 41, 59, 0.85);
-      backdrop-filter: blur(8px);
-      border: 1px solid rgba(255,255,255,0.1);
-      padding: 16px;
-      border-radius: 16px;
-      display: flex;
-      gap: 12px;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+    /* 手机端输入界面 */
+    #mobile-view {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; width: 100vw; height: 100vh;
+      background: #1e293b;
+      z-index: 100;
+      padding: 40px 20px;
+      flex-direction: column;
+      gap: 15px;
     }
+    input { padding: 14px; font-size: 16px; border: 1px solid #334155; border-radius: 8px; background: #0f172a; color: #fff; outline: none; }
+    button { padding: 14px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; }
 
-    input {
-      width: 260px;
-      padding: 10px 14px;
-      border-radius: 8px;
-      border: 1px solid #334155;
-      background: #0f172a;
-      color: #fff;
-      font-size: 16px;
-      outline: none;
-    }
-    input:focus { border-color: #38bdf8; }
-
-    button {
-      padding: 10px 20px;
-      border-radius: 8px;
-      border: none;
-      background: #2563eb;
-      color: white;
-      font-weight: bold;
-      font-size: 16px;
-      cursor: pointer;
-    }
-    button:hover { background: #1d4ed8; }
-
-    /* 4. 二维码展板 */
+    /* 大屏二维码及状态栏 */
     #qrcode-box {
       position: absolute;
       bottom: 20px;
       right: 20px;
-      z-index: 10;
       background: rgba(255, 255, 255, 0.95);
       padding: 12px;
       border-radius: 12px;
       text-align: center;
+      color: #000;
     }
-    #qrcode-box p { font-size: 12px; color: #333; margin-top: 4px; font-weight: bold; }
+    #qrcode-box img { width: 130px; height: 130px; }
+    #status-text { position: absolute; top: 10px; left: 10px; font-size: 12px; color: #64748b; }
   </style>
-  <!-- 引入前端动态生成二维码的轻量库 -->
+  <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
 
-  <!-- 弹幕画布 -->
+  <div id="status-text">正在初始化服务器连接...</div>
   <div id="screen"></div>
 
-  <!-- 本地控制台（模拟手机输入） -->
-  <div id="control-panel">
-    <input type="text" id="danmakuInput" placeholder="输入弹幕内容..." onkeydown="if(event.key==='Enter') sendDanmaku()">
-    <button onclick="sendDanmaku()">发射</button>
-  </div>
-
-  <!-- 二维码显示区 -->
+  <!-- 1. 二维码展示区 -->
   <div id="qrcode-box">
     <div id="qrcode"></div>
-    <p>扫码或多标签页互动</p>
+    <p style="font-size: 12px; font-weight: bold; margin-top: 4px;">手机扫码发送弹幕</p>
+  </div>
+
+  <!-- 2. 手机控制端界面 -->
+  <div id="mobile-view">
+    <h2 style="text-align: center;">🚀 现场发送弹幕</h2>
+    <p id="mobile-status" style="text-align: center; color: #38bdf8; font-size: 14px;">正在建立连接...</p>
+    <input type="text" id="msgInput" placeholder="请输入你要说的文字..." maxlength="30">
+    <button onclick="sendDanmaku()">发射弹幕</button>
   </div>
 
   <script>
-    // 1. 建立浏览器跨标签页通信频道
-    const channel = new BroadcastChannel('danmaku_channel');
-
+    const hash = window.location.hash.replace('#', '');
     const screen = document.getElementById('screen');
-    const input = document.getElementById('danmakuInput');
+    const statusText = document.getElementById('status-text');
 
-    // 2. 自动根据当前网页地址生成二维码
-    new QRCode(document.getElementById("qrcode"), {
-      text: window.location.href,
-      width: 100,
-      height: 100
-    });
+    // 💡 情况 A：如果是手机扫码进来的（URL 带有 #房间号）
+    if (hash) {
+      document.getElementById('mobile-view').style.display = 'flex';
+      document.getElementById('qrcode-box').style.display = 'none';
 
-    // 3. 渲染弹幕逻辑
-    const TRACK_HEIGHT = 50;
-    const TRACK_COUNT = Math.floor(window.innerHeight / TRACK_HEIGHT) - 2;
+      // 链接到公开 PeerJS 信令服务
+      const peer = new Peer();
+      let conn = null;
 
-    function createDanmaku(text) {
-      const el = document.createElement('div');
-      el.className = 'danmaku-item';
-      el.innerText = text;
+      peer.on('open', () => {
+        document.getElementById('mobile-status').innerText = '正在呼叫大屏...';
+        conn = peer.connect(hash);
 
-      // 随机分配轨道
-      const track = Math.floor(Math.random() * Math.max(1, TRACK_COUNT));
-      el.style.top = `${track * TRACK_HEIGHT + 20}px`;
+        conn.on('open', () => {
+          document.getElementById('mobile-status').innerText = '✅ 已成功连接大屏，随时可以发送！';
+        });
 
-      screen.appendChild(el);
-
-      const startX = window.innerWidth;
-      const anim = el.animate([
-        { transform: `translateX(${startX}px)` },
-        { transform: `translateX(-100%)` }
-      ], {
-        duration: 7000,
-        easing: 'linear'
+        conn.on('error', (err) => {
+          document.getElementById('mobile-status').innerText = '❌ 连接失败，请重新扫码';
+        });
       });
 
-      anim.onfinish = () => el.remove();
-    }
-
-    // 4. 发送弹幕（同时广播给其他打开的标签页）
-    function sendDanmaku() {
-      const text = input.value.trim();
-      if (!text) return;
-
-      // 本地渲染
-      createDanmaku(text);
-
-      // 广播给其他页面
-      channel.postMessage({ text: text });
-
-      input.value = '';
-    }
-
-    // 5. 监听其他页面发送过来的广播弹幕
-    channel.onmessage = (event) => {
-      if (event.data && event.data.text) {
-        createDanmaku(event.data.text);
+      window.sendDanmaku = function() {
+        const input = document.getElementById('msgInput');
+        if (conn && input.value.trim()) {
+          conn.send(input.value.trim());
+          input.value = '';
+          document.getElementById('mobile-status').innerText = '🎉 发送成功！';
+          setTimeout(() => {
+            document.getElementById('mobile-status').innerText = '✅ 已成功连接大屏';
+          }, 1500);
+        } else {
+          alert('未能建立连接，请刷新页面重试');
+        }
       }
-    };
+    } 
+    // 💡 情况 B：如果是电脑大屏端
+    else {
+      // 随机生成固定长度房间号
+      const roomId = 'dm_' + Math.random().toString(36).substring(2, 8);
+      const peer = new Peer(roomId);
+
+      peer.on('open', (id) => {
+        statusText.innerText = '系统就绪 | 房间 ID: ' + id;
+        
+        // 动态构建包含 #房间号 的完整手机访问链接
+        const mobileUrl = window.location.href.split('#')[0] + '#' + id;
+        
+        new QRCode(document.getElementById("qrcode"), {
+          text: mobileUrl,
+          width: 130,
+          height: 130
+        });
+      });
+
+      // 监听手机的连接请求
+      peer.on('connection', (conn) => {
+        statusText.innerText = '📱 提示：有新手机进入房间！';
+
+        conn.on('data', (data) => {
+          renderDanmaku(data);
+        });
+      });
+
+      // 渲染弹幕逻辑
+      function renderDanmaku(text) {
+        const el = document.createElement('div');
+        el.className = 'danmaku-item';
+        el.innerText = text;
+
+        const track = Math.floor(Math.random() * (window.innerHeight / 60 - 2));
+        el.style.top = (track * 60 + 20) + 'px';
+
+        screen.appendChild(el);
+
+        const anim = el.animate([
+          { transform: `translateX(${window.innerWidth}px)` },
+          { transform: `translateX(-100%)` }
+        ], {
+          duration: 7000,
+          easing: 'linear'
+        });
+
+        anim.onfinish = () => el.remove();
+      }
+    }
   </script>
 </body>
 </html>
