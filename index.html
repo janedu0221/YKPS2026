@@ -3,12 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>超稳定 MQTT 实时弹幕互动</title>
+  <title>原生通用 WebSocket 实时弹幕</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body, html { width: 100%; height: 100%; overflow: hidden; background: #0b0f19; font-family: -apple-system, sans-serif; color: #fff; }
+    body, html { width: 100%; height: 100%; overflow: hidden; background: #0a0a0a; font-family: -apple-system, sans-serif; color: #fff; }
     
-    /* 弹幕显示画布 */
     #screen { position: relative; width: 100vw; height: 100vh; }
     
     .danmaku-item {
@@ -21,55 +20,49 @@
       will-change: transform;
     }
 
-    /* 手机发送控制面板 */
     #mobile-view {
       display: none;
       position: fixed;
       top: 0; left: 0; width: 100vw; height: 100vh;
-      background: #0f172a;
+      background: #121212;
       z-index: 100;
       padding: 40px 20px;
       flex-direction: column;
       gap: 15px;
     }
-    input { padding: 14px; font-size: 16px; border: 1px solid #334155; border-radius: 8px; background: #1e293b; color: #fff; outline: none; }
-    button { padding: 14px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; }
-    button:active { background: #1d4ed8; }
+    input { padding: 14px; font-size: 16px; border: 1px solid #333; border-radius: 8px; background: #222; color: #fff; outline: none; }
+    button { padding: 14px; background: #007aff; color: #fff; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; }
 
-    /* 大屏二维码面板 */
     #qrcode-box {
       position: absolute;
       bottom: 20px;
       right: 20px;
-      background: rgba(255, 255, 255, 0.95);
+      background: #fff;
       padding: 12px;
       border-radius: 12px;
       text-align: center;
       color: #000;
       z-index: 50;
     }
-    #status-text { position: absolute; top: 10px; left: 10px; font-size: 12px; color: #64748b; }
+    #qrcode-box img { width: 130px; height: 130px; }
+    #status-text { position: absolute; top: 10px; left: 10px; font-size: 12px; color: #888; }
   </style>
-
-  <!-- 引入轻量级 MQTT 库及二维码库 -->
-  <script src="https://unpkg.com/mqtt@4.3.7/dist/mqtt.min.js"></script>
+  <!-- 仅引入原生二维码库 -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
 
-  <div id="status-text">正在初始化服务器...</div>
+  <div id="status-text">正在建立直连...</div>
   <div id="screen"></div>
 
-  <!-- 大屏端显示面板 -->
   <div id="qrcode-box">
     <div id="qrcode"></div>
     <p style="font-size: 12px; font-weight: bold; margin-top: 4px;">扫码发送弹幕</p>
   </div>
 
-  <!-- 手机端输入界面 -->
   <div id="mobile-view">
     <h2 style="text-align: center;">🚀 现场发送弹幕</h2>
-    <p id="mobile-status" style="text-align: center; color: #38bdf8; font-size: 14px;">正在连接云服务端...</p>
+    <p id="mobile-status" style="text-align: center; color: #007aff; font-size: 14px;">正在连接通信管道...</p>
     <input type="text" id="msgInput" placeholder="请输入你想表达的文字..." maxlength="30">
     <button onclick="sendDanmaku()">发射弹幕</button>
   </div>
@@ -79,64 +72,51 @@
     const screen = document.getElementById('screen');
     const statusText = document.getElementById('status-text');
 
-    // 免费、高可靠的公共 MQTT WebSocket 接入点（通过 WebSocket 协议访问，完全兼容 GitHub Pages HTTPS）
-    const BROKER = 'wss://broker.emqx.io:8084/mqtt';
+    // 使用开放公共的原生 WebSocket 管道
+    const WS_SERVER = 'wss://piehost.com/websocket/danmaku-demo-channel-99';
+    let ws = null;
 
-    // 💡 场景 A：手机端（URL 带有房间号 Hash）
+    // 💡 场景 A：手机端
     if (hash) {
       document.getElementById('mobile-view').style.display = 'flex';
       document.getElementById('qrcode-box').style.display = 'none';
 
-      const topic = 'danmaku_room/' + hash;
-      const client = mqtt.connect(BROKER);
+      ws = new WebSocket(WS_SERVER);
 
-      client.on('connect', () => {
-        document.getElementById('mobile-status').innerText = '✅ 云端就绪，随时可发射！';
-      });
+      ws.onopen = () => {
+        document.getElementById('mobile-status').innerText = '✅ 已成功接入网络，随时可发射！';
+      };
 
-      client.on('error', () => {
-        document.getElementById('mobile-status').innerText = '❌ 连接服务器失败，请刷新页面';
-      });
+      ws.onerror = () => {
+        document.getElementById('mobile-status').innerText = '❌ 网络连接受限，请断开代理或WiFi后重试';
+      };
 
       window.sendDanmaku = function() {
         const input = document.getElementById('msgInput');
         const text = input.value.trim();
-        if (text) {
-          // 发布弹幕消息到云端频道
-          client.publish(topic, text);
+        if (text && ws && ws.readyState === WebSocket.OPEN) {
+          // 构造附带房间号的数据包发送
+          ws.send(JSON.stringify({ room: hash, text: text }));
           input.value = '';
           document.getElementById('mobile-status').innerText = '🎉 发送成功！';
           setTimeout(() => {
-            document.getElementById('mobile-status').innerText = '✅ 云端就绪，随时可发射！';
+            document.getElementById('mobile-status').innerText = '✅ 已成功接入网络，随时可发射！';
           }, 1200);
         }
       };
 
-      // 允许敲击键盘 Enter 键快速发送
-      document.getElementById('msgInput').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') sendDanmaku();
-      });
-
     } 
     // 💡 场景 B：电脑大屏端
     else {
-      // 1. 生成唯一随机房间号
       const roomId = 'room_' + Math.floor(100000 + Math.random() * 900000);
-      const topic = 'danmaku_room/' + roomId;
 
-      // 2. 连接 MQTT 服务器并订阅频道
-      const client = mqtt.connect(BROKER);
+      ws = new WebSocket(WS_SERVER);
 
-      client.on('connect', () => {
-        statusText.innerText = '服务器已就绪 | 频道: ' + roomId;
-        client.subscribe(topic, (err) => {
-          if (!err) {
-            console.log('成功订阅弹幕频道：', topic);
-          }
-        });
-      });
+      ws.onopen = () => {
+        statusText.innerText = '通信建立成功 | 房间号: ' + roomId;
+      };
 
-      // 3. 动态绘制带房间 ID 的扫码 URL
+      // 动态画出手机二维码
       const mobileUrl = window.location.href.split('#')[0] + '#' + roomId;
       new QRCode(document.getElementById("qrcode"), {
         text: mobileUrl,
@@ -144,14 +124,17 @@
         height: 130
       });
 
-      // 4. 监听来自云端广播发来的新弹幕
-      client.on('message', (t, message) => {
-        if (t === topic) {
-          renderDanmaku(message.toString());
-        }
-      });
+      // 接收广播消息
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          // 只有收到匹配当前房间号的消息才渲染
+          if (data && data.room === roomId && data.text) {
+            renderDanmaku(data.text);
+          }
+        } catch(e) {}
+      };
 
-      // 5. 渲染运动动画
       function renderDanmaku(text) {
         const el = document.createElement('div');
         el.className = 'danmaku-item';
@@ -163,12 +146,11 @@
 
         screen.appendChild(el);
 
-        const startX = window.innerWidth;
         const anim = el.animate([
-          { transform: `translateX(${startX}px)` },
+          { transform: `translateX(${window.innerWidth}px)` },
           { transform: `translateX(-100%)` }
         ], {
-          duration: 7500,
+          duration: 7000,
           easing: 'linear'
         });
 
